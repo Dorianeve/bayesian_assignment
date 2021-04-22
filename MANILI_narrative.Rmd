@@ -1,0 +1,505 @@
+---
+title: "Artificial Intelligence Assignment - Bayesian Networks"
+author: "Claudia Manili"
+date: "22/04/2021"
+output:
+  pdf_document: default
+  code-block-font-size: \tiny
+---
+
+```{r setup, include=FALSE}
+library(BiocManager)
+library(RBGL)
+library(graph)
+library(gRbase)
+library(grid)
+library(psych)
+library(bnlearn)
+library(ggm)
+library(igraph)
+library(gRain)
+library(crop)
+library(catnet)
+
+# load dataset
+data(cad1)
+
+```
+
+Questo pdf contiene lo svolgimento dell'assignment per il corso Artificial Intelligence (parte 2) tenuto dalla Prof.ssa Nicolussi nell'ambito del Master in Data Science for Economics, Business and Finance dell'Università degli Studi di Milano.
+
+\tableofcontents
+
+\newpage
+
+\section{Esplorazione dati}
+\small
+```{r cad1}
+names(cad1)
+```
+\normalsize
+Il data set cad1, contiene dati sulla Coronary Artery Disease (Hansen, 1980; Højsgaard & Thiesson, 1995). 
+Le 14 variabili sono discrete, suddivisibili in "diagnosi", "background", "manifestazione di malattia", "misure cliniche":
+
+\begin{itemize}
+ \item Diagnosi: "CAD" (blocco 2)
+ \item Background: "Sex", "Smoker", "Hyperchol" (hypercholesterolemia), "Inherit" (predisposizione ereditaria), "SuffHeartF" (sufficient heart frequency sotto ECQ examination) (blocco 1)
+ \item Manifestazione malattia: "Hypertrophi", "AngPec" (angina pectoris), "AMI" (acute myocardial infarct), "Heartfail" (other heartfailures) (blocco 3)
+ \item Misure cliniche: "QWave", "QWavecode", "STcode", "STChange" (blocco 4)
+\end{itemize}
+
+La suddivisione in blocchi sarà utile per lo step successivo di blacklisting.
+
+\small
+```{r summary, size = "tiny"}
+summary(cad1)
+```
+\normalsize
+Le variabili sono principalmente binarie, con l'eccezione di "AngPec" che può assumere 3 valori. La descrizione di valori che le variabili possono assumere sarà poi utile in fase di inferenza, per studiare come la probabilità di avere disfunzioni all'arteria coronarica (CAD) varia in funzione dei sintomi e delle misure cliniche.
+
+\section{Learning procedure}
+
+\subsection{Blacklisting}
+Secondo le informazioni e la descrizione delle variabili fornite da Højsgaard & Thiesson nel paper del 1995 dove primariamente è stato utilizzato il dataset, le "direzioni" delle dipendenze possono essere ristrette. La divisione in blocchi, presentata nella parte di descrizione dei dati, fornisce una buona chiave interpretativa della "direzione" degli archi del grafo che proveremo a trovare. 
+Solo blocchi di variabili con numerazione più bassa possono essere collegati a blocchi con numerazione più alta. Nella processo di blacklisting viene creata una matrice di adiacenza tra nodi "possibili" e "non possibili" (Højsgaard, Edwards & Lauritzen, 2012, p. 75). Il codice è stato modificato leggermente dalla versione di Højsgaard, Edwards & Lauritzen, seguendo le indicazioni del paper originario del 1995.
+In questo caso il gruppo 4 "misure cliniche", non può influenzare nessun'altra variabile visto che intuitivamente si tratta di una misura clinica. Il gruppo 3 "manifestazione malattia" può influenzare solo la misura clinica o altre variabili nello stesso gruppo. Il gruppo 2 "Diagnosi", vale a dire la variabile "CAD" può influenzare solo i gruppo 3 o 4, e il gruppo 1, le variabili "background" possono influenzare solo variabili nei gruppo 2, 3 o 4.
+
+\small
+```{r blackL}
+block <- c(1,3,3,4,4,4,4,1,3,1,1,1,3,2)
+blM <- matrix(0, nrow=14, ncol=14)
+rownames(blM) <- colnames(blM) <- names(cad1)
+for (b in 2:4) blM[block==b, block<b] <- 1
+blackL <- data.frame(get.edgelist(as(blM, "igraph"))) 
+names(blackL) <- c("from", "to")
+```
+\normalsize
+
+\subsection{Algoritmi}
+In questa sezione saranno lanciati vari algoritmi di apprendimento della rete Bayesiana sul dataset, con relativa blacklist. Per poi valutare qual è l'algoritmo che sembra funzionare più efficacemente. Sono stati provati diversi algoritmi, cominciamo con gli score-based.
+
+\small
+```{r algorithms}
+## SCORE-BASED
+
+## Hill-Climbing
+bn_hc <- hc(cad1, blacklist=blackL) 
+## Hill-Climbing with random restarts
+bn_hc_rr <- hc(cad1, blacklist=blackL, restart = 10) 
+## Hill-Climbing with tabu search
+bn_hc_tb <- tabu(cad1, blacklist=blackL, tabu = 10)
+```
+\normalsize
+
+Dai tre score-based algorithm lanciati, i risultati sono più o meno gli stessi e il seguente è la rete individuata dagli algoritmi Hill-Climbing:
+
+\small
+```{r hill-climbing, fig.dim = c(6, 4), echo=FALSE}
+plot(as(essentialGraph(amat(bn_hc)), "graphNEL"))
+```
+\normalsize
+
+Lanciamo ora i cosidetti constraint-based algorithms.
+
+\small
+```{r constraintalgorithms}
+## CONSTRAINT-BASED
+
+## Grow-Shrink
+bn_gs <- gs(cad1, blacklist = blackL, undirected = FALSE)
+## Incremental Association
+bn_iamb <- iamb(cad1, blacklist = blackL, undirected = FALSE)
+## Fast Incremental Association
+bn_fiamb <- fast.iamb(cad1, blacklist = blackL, undirected = FALSE)
+## Interleaved Incremental Association
+bn_intiamb <- inter.iamb(cad1, blacklist = blackL, undirected = FALSE)
+
+```
+\normalsize
+
+I risultati sembrano meno accurati, visto che diversi nodi non sono legati fra loro. In seguito un esempio di rete individuata dall'algoritmo Incremental Association.
+
+\small
+```{r iamb, fig.dim = c(5, 3), echo=FALSE}
+graphviz.plot(bn_iamb)
+```
+\normalsize
+
+Proviamo ora una variazione sui constraint-based, chiamata constraint-based local discovery.
+
+\small
+```{r constraintlocaldiscalgorithms}
+## CONSTRAIN-BASED LOCAL DISCOVERY
+
+## Max-Min Parents and Children
+bn_mmpc <- mmpc(cad1, blacklist = blackL, undirected = FALSE)
+## Hybrid Parents and Children
+bn_hpc <- mmpc(cad1, blacklist = blackL, undirected = FALSE)
+## Semi-Interleaved HITON-PC
+bn_hit <- si.hiton.pc(cad1, blacklist = blackL, undirected = FALSE)
+```
+\normalsize
+
+I risultati ancora escludono diversi nodi, che non sembrano legati fra loro.
+
+\small
+```{r mmpc, fig.dim = c(6, 4), echo=FALSE}
+graphviz.plot(bn_mmpc)
+```
+\normalsize
+
+Lanciamo ora algoritmi a struttura ibrida.
+
+\small
+```{r hybrid}
+## HYBRID-STRUCTURE
+
+## Sparse Candidate
+bn_sc <- rsmax2(cad1, blacklist = blackL)
+## Max-Min Hill Climbing
+bn_mm <- mmhc(cad1, blacklist = blackL)
+## Hybrid HPC
+bn_h2pc <- h2pc(cad1, blacklist = blackL)
+```
+\normalsize
+
+Ancora i risultati sembrano essere meno accurati per via della quantità di nodi lasciati fuori dalla rete. E' stato provato anche un algoritmo della categoria "Pairwise Mutual Information Algorithms", ma i risultati sembrano graficamente molto meno accurati di tutti i precedenti algoritmi.
+
+\subsection{Valutazione network}
+
+Passiamo ora alla fase di valutazione dei network creati dai diversi algoritmi di apprendimento. A tale scopo è stato creato un Directed Acyclic Graph, basato sulle indicazioni contenute nel paper di Højsgaard & Thiesson, i quali, per capire le relazioni "a priori" tra le variabili, hanno consultato uno specialista del settore medico. Gli autori, a seguito della consultazione identificano 7 "blocchi" di variabili, invece dei 4 utilizzati per la blacklisting.
+
+\small
+```{r truedag, fig.dim= c(5,3)}
+
+true <- matrix(0, nrow=14, ncol=14)
+rownames(true) <- colnames(true) <- names(cad1)
+
+true["Sex", "Smoker"] = 1
+true["Smoker", "Hyperchol"] = 1
+true["Hyperchol", c("AngPec", "SuffHeartF")] = 1
+true["Inherit", c("CAD", "AngPec")] = 1
+true["Hypertrophi", "CAD"] = 1
+true["CAD", c("AngPec", "AMI", "Hypertrophi")] = 1
+true["AMI", "AngPec"] = 1
+true["AngPec", "AMI"] = 1
+true["QWave", "QWavecode"] = 1
+true["STcode", "STchange"] = 1
+
+true_dag <- empty.graph(names(cad1))
+amat(true_dag) <- true
+
+graphviz.plot(true_dag)
+
+```
+\normalsize
+
+Utilizziamo ora diverse metriche per comparare i risultati dei network trovati dai differenti algoritmi con il grafo costruito sulla ricerca di Højsgaard & Thiesson (1995).
+Utilizzeremo in ordine:
+\begin{itemize}
+ \item True Positive / False Positive / False Negative (con direzione archi e senza direzione)
+ \item Hamming distance ("Nella teoria dell'informazione, [...] la distanza di Hamming misura il numero di sostituzioni necessarie per convertire una stringa nell'altra, o, vista in altro modo, il numero minimo di errori che possono aver portato alla trasformazione di una stringa nell'altra.")
+ \item Comparazione visuale.
+\end{itemize}
+
+\small
+```{r tp}
+## True Positive / False Positive / False Negative
+bnlearn::compare(true_dag, bn_gs)
+## miglior risultato Hill-Climbing
+bnlearn::compare(true_dag, bn_hc)
+bnlearn::compare(true_dag, bn_hc_rr)
+## miglior risultato Hill-Climbing variazione 1
+bnlearn::compare(true_dag, bn_hc_tb)
+bnlearn::compare(true_dag, bn_hit)
+bnlearn::compare(true_dag, bn_hpc)
+bnlearn::compare(true_dag, bn_iamb)
+bnlearn::compare(true_dag, bn_fiamb)
+bnlearn::compare(true_dag, bn_intiamb)
+bnlearn::compare(true_dag, bn_mm)
+bnlearn::compare(true_dag, bn_mmpc)
+bnlearn::compare(true_dag, bn_sc)
+
+## senza la direzione degli archi 
+## miglior risultato Hill-Climbing
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_hc))) 
+## miglior risultato Hill-Climbing variazione 1
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_hc_tb)))  
+## miglior risultato Hill-Climbing variazione 2
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_hc_rr)))
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_gs)))
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_hit)))
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_hpc)))
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_iamb)))
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_fiamb)))
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_intiamb)))
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_mm)))
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_mmpc)))
+unlist(bnlearn::compare(bnlearn::skeleton(true_dag), bnlearn::skeleton(bn_sc)))
+```
+\normalsize
+
+Hill-Climbing sembra l'algoritmo più performante secondo queste metriche.
+
+\small
+```{r hd}
+## Hamming Distance 
+hamming(true_dag, bn_hc)
+hamming(true_dag, bn_hc_rr)
+hamming(true_dag, bn_hc_tb)
+hamming(true_dag, bn_gs) ## miglior risultato Grow-Shrink
+hamming(true_dag, bn_hit)
+hamming(true_dag, bn_hpc) 
+hamming(true_dag, bn_iamb)
+hamming(true_dag, bn_fiamb)
+hamming(true_dag, bn_intiamb)
+hamming(true_dag, bn_mm) 
+hamming(true_dag, bn_mmpc)
+hamming(true_dag, bn_sc)
+```
+\normalsize
+
+In questo caso il numero più basso indica la migliore performance in quanto indica il numero di sostituzioni necessarie per essere in linea con quello che abbiamo indicato come "network" benchmark. Con "hamming distance" l'algoritmo e "Grow-Shrink" sembrano essere più simili.
+
+Ora passiamo alla valutazione visuale.
+
+\small
+```{r truedagplot, fig.dim = c(6, 4)}
+## Score-based
+par(mfrow = c(2, 2))
+graphviz.compare(true_dag, cpdag(bn_hc), cpdag(bn_hc_rr), cpdag(bn_hc_tb))
+
+## Constraint-based
+par(mfrow = c(2, 3))
+graphviz.compare(true_dag, cpdag(bn_gs), cpdag(bn_iamb), 
+                 cpdag(bn_fiamb), cpdag(bn_intiamb))
+
+## Constraint-based Local discovery
+par(mfrow = c(2, 2))
+graphviz.compare(true_dag, cpdag(bn_mmpc), cpdag(bn_hpc), cpdag(bn_hit))
+
+## Hybrid
+par(mfrow = c(2, 2))
+graphviz.compare(true_dag, cpdag(bn_sc), cpdag(bn_mm), cpdag(bn_h2pc))
+
+```
+\normalsize
+
+Nelle figure sopra, tutti i network sono conforntati col network individuato dagli esperti di settore: gli archi neri sono gli archi correttamente individuati dall'algoritmo, gli archi rossi sono quelli erroneamenti individuati, e gli archi blu tratteggiati sono archi non individuati dagli algoritmi di apprendimento.
+
+Il confronto visuale conferma quello che la metrica di True Positive suggerisce: il miglior algoritmo per il dataset in questione è Hill-Climbing.
+
+## Commento della struttura
+Il network individuato da Hill-Climbing suggerisce che le variabili che influenzano la presenza di disfuzioni coronarie siano predisposizione ereditaria e hypercholesterolemia. La variabile CAD sembra influenzare le variabili di manifestazione malattia, con l'eccezione di "Heartfailures" che sembra piuttosto essere legata a "Hypertrophi". La frequenza cardiaca sottosforzo (SuffHeartF) sembra invece condizionare le variabili di "Hyperchol" e "Hypertrophi".
+
+\subsection{Stima dei parametri}
+Stimo adesso i parametri delle probabilità condizionate presenti in ogni nodo.
+
+\small
+```{r parameters}
+## Maximum Likelihood Estimator
+mle <- bn.fit(bn_hc, cad1, method = "mle")
+## Bayesian estimation
+bay <- bn.fit(bn_hc, cad1, method = "bayes")
+```
+\normalsize
+
+\section{Inferenza}
+
+Procediamo ora con lo studio su come varia la probabilità di avere disfuzione all'arteria coronarica (CAD) in funzione dei sintomi ("Hypertrophi", "AngPec" (angina pectoris), "AMI" (acute myocardial infarct), "Heartfail" (other heartfailures)), delle misure cliniche ("QWave", "QWavecode", "STcode", "STChange") e delle variabili di confondimento ("Inherit" e "Hyperchol").
+
+\small
+```{r sintomi, fig.dim = c(5, 3)}
+cad_gr <- as.grain(mle)
+jtree <- compile(cad_gr)
+plot(jtree, type = "jt", main = "Junction Tree")
+
+## SINTOMI
+
+## Con Angina Pectoris Atipica 20% probabilità di avere disfuzioni coronariche
+syntom1a <- setFinding(jtree, nodes="AngPec", 
+                       states = c("Atypical"))
+querygrain(syntom1a,nodes=c("CAD"),type = "marginal") 
+
+## Con Angina Pectoris Tipica 70% probabilità di avere disfuzioni coronariche
+syntom1b<- setFinding(jtree, nodes="AngPec", 
+                      states = c("Typical"))
+querygrain(syntom1b,nodes=c("CAD"),type = "marginal") 
+
+## Senza Angina Pectoris 15% probabilità di avere disfuzioni coronariche
+syntom1c<- setFinding(jtree, nodes="AngPec", 
+                      states = c("None"))
+querygrain(syntom1c,nodes=c("CAD"),type = "marginal") 
+
+## Con AMI Definite 80% probabilità di avere disfuzioni coronariche
+syntom2a <- setFinding(jtree, nodes="AMI", 
+                       states = c("Definite"))
+querygrain(syntom2a,nodes=c("CAD"),type = "marginal") 
+
+## Con AMI NotCertain 32% probabilità di avere disfuzioni coronariche
+syntom2b<- setFinding(jtree, nodes="AMI", 
+                      states = c("NotCertain"))
+querygrain(syntom2b,nodes=c("CAD"),type = "marginal") 
+
+## Con Heartfail 32% probabilità di avere disfuzioni coronariche
+syntom3a <- setFinding(jtree, nodes="Heartfail", 
+                       states = c("Yes"))
+querygrain(syntom3a,nodes=c("CAD"),type = "marginal") 
+
+## Senza Heartfail 49% of probabilità di avere disfuzioni coronariche
+syntom3b<- setFinding(jtree, nodes="Heartfail", 
+                      states = c("No"))
+querygrain(syntom3b,nodes=c("CAD"),type = "marginal") 
+
+## Con tutti e tre i sintomi 88% probabilità di avere disfuzioni coronariche
+syntoms <- setFinding(jtree, nodes=c("AngPec", "AMI", "Heartfail"),
+                      states=list(c("Typical"), c( "Definite" ), c("Yes")))
+querygrain(syntoms,nodes=c("CAD"),type = "marginal") 
+```
+\normalsize
+
+Osserviamo dunque che la probabilità che Heartfailure sia una manifestazione della malattia è piuttosto bassa, considerando le alte probabilità che l'occorrenza di Angina Pectoris tipica o Acute Myocardic Infarct (AMI) sia manifestazione di CAD. Nell'88% dei casi, l'occorrenza simultanea di Angina Pectoris, Acute Myocardic Infarct (AMI) e Heartfailure, è manifestazione di una disfuzione dell'arteria coronarica. Il fatto che la variabile Heartfailure, considerata in principio un sintomo, sia legata a disfunzioni coronariche è messa in dubbio, poichè secondo i dati disponibili, la sua assenza coincide con una maggior probabilità di disfuzioni coronariche.
+
+Passiamo all'analisi della variazione della probabilità di CAD in funzione delle misure cliniche.
+
+\small
+```{r misure}
+## MISURE CLINICHE
+## Con entrambe le misure cliniche positive, disfunzioni coronariche
+## presenti con probabilità dell'86%
+meas <- setFinding(jtree, nodes=c("QWave", "STchange"),
+                   states=list(c("Yes"), c( "Yes")))
+querygrain(meas,nodes=c("CAD"),type = "marginal") 
+
+## Con le misure cliniche "QWave" positive, disfunzioni coronariche 
+## presenti con probabilità dell'74%
+meas1a <- setFinding(jtree, nodes=c("QWave"),
+                     states=c("Yes"))
+querygrain(meas1a,nodes=c("CAD"),type = "marginal") 
+
+## Con le misure cliniche "QWave" negative, disfunzioni coronariche 
+## presenti con probabilità del 29%
+meas1b <- setFinding(jtree, nodes=c("QWave"),
+                     states=c("No"))
+querygrain(meas1b,nodes=c("CAD"),type = "marginal")  
+
+## Con le misure cliniche "STchange" positive, disfunzioni coronariche 
+## presenti con probabilità dell'64%
+meas2a <- setFinding(jtree, nodes=c("STchange"),
+                     states=c("Yes"))
+querygrain(meas2a,nodes=c("CAD"),type = "marginal") 
+
+## Con le misure cliniche "STchange" negative, disfunzioni coronariche 
+## presenti con probabilità dell'30%
+meas2b <- setFinding(jtree, nodes=c("STchange"),
+                     states=c("No"))
+querygrain(meas2b,nodes=c("CAD"),type = "marginal") 
+
+```
+\normalsize
+
+Vedendo il variare dell'occorrenza di disfuzioni coronarie in base alla misura clinica considerata, possiamo concludere che "QWave" sembra essere una misurazione più accurata di "STchange" poichè quando questa è positiva, la variabile CAD, che segnala la presenza di disfunzioni coronariche, ha il 74% delle probabilità di essere positiva, contro il 64% della seconda misura.
+Qualora entrambe le misure fossero positive, la probabilità di avere disfunzioni all'arteria coronarica è approssimativamente dell'86%.
+
+```{r confounding}
+## CONFOUNDING VARIABLES
+## Con entrambe le variabili presenti, disfunzioni all'arteria coronarica
+## occorrono nel 74% dei casi
+conf <- setFinding(jtree, nodes = c("Inherit", "Hyperchol"),
+                   states = list(c("Yes"), c( "Yes" )))
+querygrain(conf,nodes=c("CAD"),type = "marginal") 
+
+## Con predisposizione ereditaria, disfunzioni all'arteria coronarica
+## occorrono nel 66% dei casi
+conf1a <- setFinding(jtree, nodes = c("Inherit"),
+                     states = c("Yes"))
+querygrain(conf1a, nodes = c("CAD"),type = "marginal") 
+
+## Senza predisposizione erediraria, disfunzioni all'arteria coronarica
+## occorrono nel 35% dei casi
+conf1b <- setFinding(jtree, nodes = c("Inherit"), 
+                     states = c("No"))
+querygrain(conf1b, nodes = c("CAD"),type = "marginal") 
+
+## Con hypercholesterolemia, disfunzioni coronariche occorrono nel 62% dei casi
+conf2a <- setFinding(jtree, nodes = c("Hyperchol"),
+                     states = c( "Yes" ))
+querygrain(conf2a,nodes=c("CAD"),type = "marginal") 
+
+## Senza hypercholesterolemia, disfunzioni coronariche occorrono nel 25% dei casi
+conf2b <- setFinding(jtree, nodes=c("Hyperchol"),states=c( "No" ))
+querygrain(conf2b,nodes=c("CAD"),type = "marginal") 
+
+```
+\normalsize
+
+Possiamo concludere che la presenza delle variabili di confondimento, condiziona l'occorrenza di disfuzioni all'arteria coronaria. Se predisposizione ereditaria e hypercholesterolemia sono entrambi presenti, c'è un occorrenza di disfunzioni coronariche nel 74% dei casi.
+Prese singolarmente, le confounding variables, se presenti, condizionano entrambi la presenza di disfunzioni coronariche (>60%). Qualora fossero invece assenti, la presenza di disfunzioni di ridurrebbe al 35% (nel caso di assenza di predisposizione eretiraria) e al 25% nel caso di hypercholesterolemia.
+
+\subsection{Conclusioni inferenza}
+Attraverso lo studio della rete bayesiana su sintomi, misure cliniche e variabili di confondimento, possiamo concludere che Angina Pectoris e Acute Myocardic Infarct (AMI) sono sintomi di disfunzioni coronarie, e QWave sembra essere la migliore misura clinica per segnalare la presenza di disfunzioni all'arteria coronaria.
+Sembra anche che avere predisposizione eretiraria o soffrire di hypercholesterolemia influenzi l'occorrenza di disfunzioni coronariche.
+
+
+\section{Classificazione}
+
+Impostiamo lo studio come un problema di classificazione, chiedendo all'algoritmo di identificare l'occorrenza della variabile "CAD", in base alle altre variabili presenti nel dataset. Useremo i seguenti algoritmi e poi ne valuteremo le performances:
+\begin{itemize}
+ \item Naive Bayes
+ \item Tree-Augmented Naive Bayes (TAN)
+\end{itemize}
+
+
+\small
+```{r bayes, fig.dim = c(5, 3)}
+## Naive Bayes
+nbcl <- naive.bayes(cad1, training="CAD")
+graphviz.plot(nbcl,layout="fdp")
+
+nbcl.trained <- bn.fit(nbcl, cad1)
+coef(nbcl.trained$CAD)
+
+```
+
+
+```{r tan, fig.dim = c(5, 3)}
+## Tree-Augmented Naive Bayes
+tan.cl <- tree.bayes(cad1,training="CAD")
+graphviz.plot(tan.cl)
+
+tancl.trained <- bn.fit(tan.cl, cad1)
+coef(tancl.trained$CAD)
+```
+\normalsize
+
+I risultati individuano due reti diverse. Valutando in base al grafo della rete, sembra che il Tree-Augmented Naive Bayes si avvicini più alla rete che abbiamo individuato con Hill-Climbing.
+
+\small
+```{r comparison, fig.dim = c(5, 3)}
+cv.nb <- bn.cv(nbcl, data = cad1, runs = 10,
+               method = "k-fold", folds = 10)
+
+cv.tan <- bn.cv(tan.cl, data = cad1,
+                runs = 10,
+                method = "k-fold", folds = 10)
+
+plot(cv.nb,cv.tan, xlab=c("NBC","TAN"))
+```
+\normalsize
+
+Nella valutazione dei modelli di classificazione, quello più efficace si rivela essere Naive Bayes, modello per la quale la loss-function è lievemente più bassa di Tree-Augmented Bayes, il primo con uno score di approx 0.15 contro 0.16 del secondo.
+
+\section{References}
+
+Højsgaard, S., and Thiesson, B. (1995), "BIFROST - Block recursive models Induced From Relevant knowledge, Observations, and Statistical Techniques", \emph{Computational Statistics and Data Analysis}, 19, 155-175.
+
+Højsgaard, S. (2012), "Graphical Independence Networks with the gRain Package for R ", \emph{Journal of Statistical Software}, 46, 10. 
+
+Højsgaard, S.,Edwards, D., Lauritzen, S. (2012) \emph{Graphical Models with R}, New York: Springer.
+
+Nagarajan, R., Scutari, M., Lèbre, S., (2013) \emph{Bayesian Networks in R with Applications in System Biology}, New York: Springer.
+
+Scutari, M. (2010), "Learning Bayesian Networks with the bnlearn R Package, \emph{Journal of Statistical Software}, 35, 3.
+
+Full code available at https://github.com/Dorianeve/bayesian_assignment 
+

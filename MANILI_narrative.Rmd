@@ -1,7 +1,7 @@
 ---
 title: "Artificial Intelligence Assignment - Bayesian Networks"
 author: "Claudia Manili"
-date: "22/04/2021"
+date: "06/05/2021"
 output:
   pdf_document: default
   code-block-font-size: \tiny
@@ -62,7 +62,7 @@ Le variabili sono principalmente binarie, con l'eccezione di "AngPec" che può a
 \subsection{Blacklisting}
 Secondo le informazioni e la descrizione delle variabili fornite da Højsgaard & Thiesson nel paper del 1995 dove primariamente è stato utilizzato il dataset, le "direzioni" delle dipendenze possono essere ristrette. La divisione in blocchi, presentata nella parte di descrizione dei dati, fornisce una buona chiave interpretativa della "direzione" degli archi del grafo che proveremo a trovare. 
 Solo blocchi di variabili con numerazione più bassa possono essere collegati a blocchi con numerazione più alta. Nella processo di blacklisting viene creata una matrice di adiacenza tra nodi "possibili" e "non possibili" (Højsgaard, Edwards & Lauritzen, 2012, p. 75). Il codice è stato modificato leggermente dalla versione di Højsgaard, Edwards & Lauritzen, seguendo le indicazioni del paper originario del 1995.
-In questo caso il gruppo 4 "misure cliniche", non può influenzare nessun'altra variabile visto che intuitivamente si tratta di una misura clinica. Il gruppo 3 "manifestazione malattia" può influenzare solo la misura clinica o altre variabili nello stesso gruppo. Il gruppo 2 "Diagnosi", vale a dire la variabile "CAD" può influenzare solo i gruppo 3 o 4, e il gruppo 1, le variabili "background" possono influenzare solo variabili nei gruppo 2, 3 o 4.
+In questo caso il gruppo 4 "misure cliniche", non può influenzare nessun'altra variabile visto che intuitivamente si tratta di una misura clinica. Il gruppo 3 "manifestazione malattia" può influenzare solo la misura clinica o altre variabili nello stesso gruppo. Il gruppo 2 "Diagnosi", vale a dire la variabile "CAD" può influenzare solo i gruppi 3 o 4, e il gruppo 1, le variabili "background" possono influenzare solo variabili nei gruppo 2, 3 o 4.
 
 \small
 ```{r blackL}
@@ -95,11 +95,11 @@ Dai tre score-based algorithm lanciati, i risultati sono più o meno gli stessi 
 
 \small
 ```{r hill-climbing, fig.dim = c(6, 4), echo=FALSE}
-plot(as(essentialGraph(amat(bn_hc)), "graphNEL"))
+plot(as(amat(bn_hc), "graphNEL"))
 ```
 \normalsize
-
-Lanciamo ora i cosidetti constraint-based algorithms.
+Le connessioni individuate sembrano più o meno plausibili, con la sola esclusione della variabile "Inherit - predisposizione ereditaria" che sembra essere influenzata dalla condizione di fumatore. 
+Lanciamo ora altri algoritmi di apprendimento, vedendo se effettivamente le connesioni trovate paiono più o meno plausibili dei primi algoritmi score-based.
 
 \small
 ```{r constraintalgorithms}
@@ -117,7 +117,7 @@ bn_intiamb <- inter.iamb(cad1, blacklist = blackL, undirected = FALSE)
 ```
 \normalsize
 
-I risultati sembrano meno accurati, visto che diversi nodi non sono legati fra loro. In seguito un esempio di rete individuata dall'algoritmo Incremental Association.
+I risultati sembrano meno accurati (si veda prossima figura), visto che diversi nodi non sono legati fra loro. In seguito un esempio di rete individuata dall'algoritmo Incremental Association.
 
 \small
 ```{r iamb, fig.dim = c(5, 3), echo=FALSE}
@@ -167,7 +167,7 @@ Ancora i risultati sembrano essere meno accurati per via della quantità di nodi
 
 \subsection{Valutazione network}
 
-Passiamo ora alla fase di valutazione dei network creati dai diversi algoritmi di apprendimento. A tale scopo è stato creato un Directed Acyclic Graph, basato sulle indicazioni contenute nel paper di Højsgaard & Thiesson, i quali, per capire le relazioni "a priori" tra le variabili, hanno consultato uno specialista del settore medico. Gli autori, a seguito della consultazione identificano 7 "blocchi" di variabili, invece dei 4 utilizzati per la blacklisting.
+Passiamo ora alla fase di valutazione dei network creati dai diversi algoritmi di apprendimento. Visivamente gli algoritmi Hill-Climbing sembrano performare meglio ma, per una valutazione più accurata, utilizziamo diverse tecniche di valutazione. A tale scopo è stato creato un Directed Acyclic Graph, basato sulle indicazioni contenute nel paper originale di Højsgaard & Thiesson (1995), i quali, per capire le relazioni "a priori" tra le variabili, hanno consultato uno specialista del settore medico. Gli autori, a seguito della consultazione identificano 7 "blocchi" di variabili, invece dei 4 utilizzati per la blacklisting.
 
 \small
 ```{r truedag, fig.dim= c(5,3)}
@@ -259,7 +259,7 @@ hamming(true_dag, bn_sc)
 ```
 \normalsize
 
-In questo caso il numero più basso indica la migliore performance in quanto indica il numero di sostituzioni necessarie per essere in linea con quello che abbiamo indicato come "network" benchmark. Con "hamming distance" l'algoritmo e "Grow-Shrink" sembrano essere più simili.
+In questo caso il numero più basso indica la migliore performance in quanto indica il numero di sostituzioni necessarie per essere in linea con quello che abbiamo indicato come "network benchmark". Con "hamming distance" l'algoritmo "Grow-Shrink" sembra essere più performante.
 
 Ora passiamo alla valutazione visuale.
 
@@ -285,9 +285,9 @@ graphviz.compare(true_dag, cpdag(bn_sc), cpdag(bn_mm), cpdag(bn_h2pc))
 ```
 \normalsize
 
-Nelle figure sopra, tutti i network sono conforntati col network individuato dagli esperti di settore: gli archi neri sono gli archi correttamente individuati dall'algoritmo, gli archi rossi sono quelli erroneamenti individuati, e gli archi blu tratteggiati sono archi non individuati dagli algoritmi di apprendimento.
+Nelle figure sopra, tutti i network sono confrontati col network individuato dagli esperti di settore: gli archi neri sono gli archi correttamente individuati dall'algoritmo (true positive), gli archi rossi sono quelli erroneamenti individuati (false positive), e gli archi blu tratteggiati sono archi non individuati (false negative) dagli algoritmi di apprendimento.
 
-Il confronto visuale conferma quello che la metrica di True Positive suggerisce: il miglior algoritmo per il dataset in questione è Hill-Climbing.
+Il confronto visuale conferma quello che la valutazione personale e metrica di True Positive suggerisce: il miglior algoritmo per il dataset è Hill-Climbing.
 
 ## Commento della struttura
 Il network individuato da Hill-Climbing suggerisce che le variabili che influenzano la presenza di disfuzioni coronarie siano predisposizione ereditaria e hypercholesterolemia. La variabile CAD sembra influenzare le variabili di manifestazione malattia, con l'eccezione di "Heartfailures" che sembra piuttosto essere legata a "Hypertrophi". La frequenza cardiaca sottosforzo (SuffHeartF) sembra invece condizionare le variabili di "Hyperchol" e "Hypertrophi".
@@ -358,7 +358,7 @@ querygrain(syntoms,nodes=c("CAD"),type = "marginal")
 ```
 \normalsize
 
-Osserviamo dunque che la probabilità che Heartfailure sia una manifestazione della malattia è piuttosto bassa, considerando le alte probabilità che l'occorrenza di Angina Pectoris tipica o Acute Myocardic Infarct (AMI) sia manifestazione di CAD. Nell'88% dei casi, l'occorrenza simultanea di Angina Pectoris, Acute Myocardic Infarct (AMI) e Heartfailure, è manifestazione di una disfuzione dell'arteria coronarica. Il fatto che la variabile Heartfailure, considerata in principio un sintomo, sia legata a disfunzioni coronariche è messa in dubbio, poichè secondo i dati disponibili, la sua assenza coincide con una maggior probabilità di disfuzioni coronariche.
+Osserviamo dunque che la probabilità che Heartfailure sia una manifestazione della malattia è piuttosto bassa, considerando le alte probabilità che l'occorrenza di Angina Pectoris tipica o Acute Myocardic Infarct (AMI) sia manifestazione di CAD. Nell'88% dei casi, l'occorrenza simultanea di Angina Pectoris, Acute Myocardic Infarct (AMI) e Heartfailure, è manifestazione di una disfuzione dell'arteria coronarica. Il fatto che la variabile Heartfailure, considerata in principio un sintomo, sia legata a disfunzioni coronariche è messa in dubbio dai dati in questione, poichè secondo i dati disponibili, la sua assenza coincide con una maggior probabilità di disfuzioni coronariche.
 
 Passiamo all'analisi della variazione della probabilità di CAD in funzione delle misure cliniche.
 
